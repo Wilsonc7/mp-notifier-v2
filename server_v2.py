@@ -1,79 +1,61 @@
-import os
 from flask import Flask, jsonify
 from flask_cors import CORS
-from apscheduler.schedulers.background import BackgroundScheduler
-
 from app_v2.models import DB
 from app_v2.routes import bp as api_bp
-from app_v2.polling import run_polling_job
+from app_v2.polling import start_scheduler
 from app_v2.config import Config
 
 
-# ============================
-# Crear la aplicación Flask
-# ============================
 def create_app():
+    """
+    Crea e inicializa la aplicación Flask principal.
+    Compatible con Render y Gunicorn.
+    """
     app = Flask(__name__)
+
+    # Carga configuración general
     app.config.from_object(Config)
 
-    # Inicializar extensiones
+    # Inicializa SQLAlchemy correctamente (soluciona error de contexto)
     DB.init_app(app)
-    CORS(app)
 
-    # Registrar Blueprint
+    # Permite acceso desde el ESP32, navegadores, etc.
+    CORS(app, resources={r"/*": {"origins": "*"}})
+
+    # Registra las rutas principales
     app.register_blueprint(api_bp)
 
-    # Rutas básicas
+    # ============================
+    # Endpoints básicos
+    # ============================
     @app.get("/")
     def index():
-        return jsonify({"ok": True, "message": "MP Notifier v2 funcionando correctamente 🚀"}), 200
+        """Endpoint base para verificar disponibilidad"""
+        return jsonify({"ok": True, "message": "API BlackDog MP Notifier v2 funcionando ✅"}), 200
 
     @app.get("/health")
     def health():
+        """Endpoint de salud para monitoreo"""
         return jsonify({"ok": True, "status": "healthy"}), 200
+
+    # ============================
+    # Inicializa scheduler (polling)
+    # ============================
+    with app.app_context():
+        try:
+            start_scheduler(app)
+            print("[Scheduler] Iniciado correctamente ✅")
+        except Exception as e:
+            print(f"[Scheduler] Error al iniciar: {e}")
 
     return app
 
 
-# ============================
-# Crear instancia global de app
-# ============================
+# =========================================================
+# Punto de entrada principal (usado por Gunicorn o local)
+# =========================================================
 app = create_app()
 
-
-# ============================
-# Scheduler
-# ============================
-def start_scheduler():
-    scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(
-        run_polling_job,
-        "interval",
-        seconds=Config.POLLING_INTERVAL_SECONDS,
-        id="polling_task",
-        replace_existing=True,
-    )
-    scheduler.start()
-    print("[Scheduler] Polling inicializado correctamente ⏱️")
-
-
-# ============================
-# Setup inicial antes del primer request
-# ============================
-@app.before_first_request
-def setup():
-    with app.app_context():
-        try:
-            DB.create_all()
-            print("[DB] Tablas creadas/verificadas correctamente ✅")
-        except Exception as e:
-            print(f"[DB] Error creando tablas: {e}")
-    start_scheduler()
-
-
-# ============================
-# Main
-# ============================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    # Modo desarrollo local
+    app.run(host="0.0.0.0", port=10000, debug=True)

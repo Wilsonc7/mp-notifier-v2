@@ -6,10 +6,10 @@ from app_v2.polling import run_polling_job
 
 bp = Blueprint("api", __name__)
 
-
 # ============================
 # Helpers
 # ============================
+
 def get_device_from_auth():
     """Obtiene el dispositivo autenticado desde el header Authorization"""
     auth = request.headers.get("Authorization")
@@ -17,11 +17,11 @@ def get_device_from_auth():
         return None
 
     token = auth.replace("Bearer ", "").strip()
-    session = DB.session
     try:
-        q = select(Device).where(Device.token == token)
-        dev = session.execute(q).scalars().first()
-        return dev
+        with DB.session() as session:
+            q = select(Device).where(Device.token == token)
+            dev = session.execute(q).scalars().first()
+            return dev
     except Exception as e:
         print(f"[Auth] Error obteniendo device: {e}")
         return None
@@ -41,8 +41,10 @@ def manual_poll():
     """Fuerza una ejecución manual del polling"""
     try:
         run_polling_job()
+        print("[Polling] Ejecutado manualmente ✅")
         return jsonify({"ok": True, "message": "Polling ejecutado manualmente ✅"}), 200
     except Exception as e:
+        print(f"[Polling] Error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
@@ -57,27 +59,27 @@ def device_payments():
     if not d:
         return jsonify({"error": "No autorizado"}), 401
 
-    session = DB.session
     try:
-        pagos = (
-            session.query(Payment)
-            .filter_by(device_id=d.id)
-            .order_by(Payment.created_at.desc())
-            .limit(10)
-            .all()
-        )
+        with DB.session() as session:
+            pagos = (
+                session.query(Payment)
+                .filter_by(device_id=d.id)
+                .order_by(Payment.created_at.desc())
+                .limit(10)
+                .all()
+            )
 
-        result = []
-        for p in pagos:
-            result.append({
+            result = [{
                 "id": p.id,
                 "nombre": p.payer_name,
                 "monto": p.amount,
                 "estado": p.status,
                 "fecha": p.created_at.isoformat()
-            })
+            } for p in pagos]
 
+        print(f"[Pagos] Enviando {len(result)} pagos para device_id={d.id}")
         return jsonify(result), 200
+
     except Exception as e:
         print(f"[Pagos] Error al obtener pagos: {e}")
         return jsonify({"error": str(e)}), 500
@@ -92,6 +94,7 @@ def pagos_alias():
 # ============================
 # Registro de nuevo dispositivo
 # ============================
+
 @bp.post("/register")
 def register_device():
     data = request.get_json() or {}
@@ -99,19 +102,21 @@ def register_device():
     if not name:
         return jsonify({"error": "Nombre requerido"}), 400
 
-    session = DB.session
     try:
-        new_dev = Device(name=name)
-        session.add(new_dev)
-        session.commit()
+        with DB.session() as session:
+            new_dev = Device(name=name)
+            session.add(new_dev)
+            session.commit()
 
-        return jsonify({
-            "ok": True,
-            "id": new_dev.id,
-            "token": new_dev.token
-        }), 201
+            print(f"[Register] Nuevo dispositivo registrado: {new_dev.name} (ID={new_dev.id})")
+
+            return jsonify({
+                "ok": True,
+                "id": new_dev.id,
+                "token": new_dev.token
+            }), 201
+
     except Exception as e:
-        session.rollback()
         print(f"[Register] Error: {e}")
         return jsonify({"error": str(e)}), 500
 
@@ -119,11 +124,19 @@ def register_device():
 # ============================
 # Prueba de conexión cifrada
 # ============================
+
 @bp.post("/secure")
 def secure_test():
     data = request.get_json()
     if not data or "msg" not in data:
         return jsonify({"error": "Falta parámetro 'msg'"}), 400
+
     encrypted = encrypt_data(data["msg"])
     decrypted = decrypt_data(encrypted)
-    return jsonify({"ok": True, "original": data["msg"], "encrypted": encrypted, "decrypted": decrypted})
+
+    return jsonify({
+        "ok": True,
+        "original": data["msg"],
+        "encrypted": encrypted,
+        "decrypted": decrypted
+    })
