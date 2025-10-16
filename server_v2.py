@@ -3,7 +3,7 @@ from flask_cors import CORS
 from app_v2.models import DB
 from app_v2.routes import bp as api_bp
 from app_v2.polling import start_scheduler
-from config import Config
+from app_v2.config import Config
 import os
 
 
