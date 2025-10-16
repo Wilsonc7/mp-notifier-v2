@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: mp-notifier-v2
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server_v2:app
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: FERNET_KEY
+        sync: false
+      - key: POLLING_INTERVAL_SECONDS
+        value: 30
+      - key: FLASK_ENV
+        value: production
