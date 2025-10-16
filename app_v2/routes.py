@@ -288,3 +288,51 @@ def device_heartbeat():
         pass
     DB.session.commit()
     return jsonify({"ok": True, "status": d.status}), 200
+# =========================
+# Alias para compatibilidad con /pagos (ESP32 antiguo)
+# =========================
+@bp.get("/pagos")
+def pagos_alias():
+    """
+    Alias de compatibilidad: llama internamente a /devices/payments
+    """
+    return device_payments()
+
+
+# =========================
+# Endpoint de estado general del sistema
+# =========================
+@bp.get("/status")
+def system_status():
+    """
+    Muestra resumen del estado del sistema para monitoreo o debug.
+    No requiere autenticación.
+    """
+    try:
+        merchants_count = DB.session.query(Merchant).count()
+        devices_count = DB.session.query(Device).count()
+        active_devices = DB.session.query(Device).filter_by(status="active").count()
+        blocked_devices = DB.session.query(Device).filter_by(status="blocked").count()
+        last_payment = (
+            DB.session.query(Payment)
+            .order_by(desc(Payment.date_created))
+            .limit(1)
+            .first()
+        )
+        last_payment_ts = (
+            last_payment.date_created.isoformat() if last_payment else None
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "merchants": merchants_count,
+                "devices_total": devices_count,
+                "devices_active": active_devices,
+                "devices_blocked": blocked_devices,
+                "last_payment": last_payment_ts,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        ), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
