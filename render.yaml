@@ -2,8 +2,11 @@ services:
   - type: web
     name: mp-notifier-v2
     env: python
-    buildCommand: pip install -r requirements.txt
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: gunicorn server_v2:app
+    autoDeploy: true
+    runtime: python-3.11.6
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -13,3 +16,5 @@ services:
         value: 30
       - key: FLASK_ENV
         value: production
+      - key: PORT
+        value: 10000
