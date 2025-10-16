@@ -2,7 +2,7 @@ from flask import Flask
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 from app_v2.routes import bp as api_bp
-from app_v2.utils.polling import poll_all_merchants
+from app_v2.polling import poll_all_merchants
 from app_v2.utils.config import DB
 import os
 
