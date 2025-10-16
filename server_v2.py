@@ -9,49 +9,42 @@ from app_v2.polling import run_polling_job
 from app_v2.config import Config
 
 
-# =========================================================
-# Crear la aplicación Flask y registrar todos los módulos
-# =========================================================
+# ============================
+# Crear la aplicación Flask
+# ============================
 def create_app():
     app = Flask(__name__)
-
-    # Cargar configuración general
     app.config.from_object(Config)
 
-    # Inicializar SQLAlchemy correctamente
+    # Inicializar extensiones
     DB.init_app(app)
-
-    # Habilitar CORS
     CORS(app)
 
-    # Registrar las rutas principales (API)
+    # Registrar Blueprint
     app.register_blueprint(api_bp)
 
-    # =====================================================
-    # Endpoint raíz y de health check
-    # =====================================================
+    # Rutas básicas
     @app.get("/")
     def index():
         return jsonify({"ok": True, "message": "MP Notifier v2 funcionando correctamente 🚀"}), 200
 
     @app.get("/health")
     def health():
-        return jsonify({"ok": True, "ts": "OK"}), 200
+        return jsonify({"ok": True, "status": "healthy"}), 200
 
     return app
 
 
-# =========================================================
-# Inicialización global
-# =========================================================
+# ============================
+# Crear instancia global de app
+# ============================
 app = create_app()
 
 
-# =========================================================
-# Scheduler (polling en segundo plano)
-# =========================================================
+# ============================
+# Scheduler
+# ============================
 def start_scheduler():
-    """Inicia el proceso recurrente que consulta pagos en segundo plano"""
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(
         run_polling_job,
@@ -64,25 +57,23 @@ def start_scheduler():
     print("[Scheduler] Polling inicializado correctamente ⏱️")
 
 
-# =========================================================
-# Inicialización antes del primer request
-# =========================================================
+# ============================
+# Setup inicial antes del primer request
+# ============================
 @app.before_first_request
-def initialize():
-    """Crea tablas si no existen y arranca el scheduler"""
+def setup():
     with app.app_context():
         try:
             DB.create_all()
             print("[DB] Tablas creadas/verificadas correctamente ✅")
         except Exception as e:
-            print(f"[DB] Error al crear tablas: {e}")
+            print(f"[DB] Error creando tablas: {e}")
     start_scheduler()
 
 
-# =========================================================
-# Ejecutar la app
-# =========================================================
+# ============================
+# Main
+# ============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    print(f"[SERVER] Iniciando MP Notifier v2 en puerto {port} 🌐")
     app.run(host="0.0.0.0", port=port)
