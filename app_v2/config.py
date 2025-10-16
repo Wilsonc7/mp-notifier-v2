@@ -1,22 +1,24 @@
 import os
-from flask_sqlalchemy import SQLAlchemy
-from dotenv import load_dotenv
-
-# Carga variables de entorno desde .env (solo local, Render ya lo maneja)
-load_dotenv()
 
 
-# ============================
-# ⚙️ Configuración general
-# ============================
 class Config:
+    # =====================================================
+    # Configuración de base de datos
+    # =====================================================
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # =====================================================
+    # Clave para cifrado de datos (usada en utils.py)
+    # =====================================================
     FERNET_KEY = os.environ.get("FERNET_KEY")
+
+    # =====================================================
+    # Intervalo de chequeo del scheduler
+    # =====================================================
     POLLING_INTERVAL_SECONDS = int(os.environ.get("POLLING_INTERVAL_SECONDS", 30))
 
-
-# ============================
-# 🧩 Instancia global de DB
-# ============================
-DB = SQLAlchemy()
+    # =====================================================
+    # Configuración de entorno
+    # =====================================================
+    FLASK_ENV = os.environ.get("FLASK_ENV", "production")
