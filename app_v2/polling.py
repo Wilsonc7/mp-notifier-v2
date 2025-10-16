@@ -1,13 +1,13 @@
 import time
 from flask import current_app
 from app_v2.models import DB
-from app_v2.utils.mp_client import process_payments
+from app_v2.clients.mp_client import process_payments  # ✅ ruta corregida
 
 
 def run_polling_job():
     """
     Job ejecutado periódicamente por APScheduler para consultar pagos nuevos.
-    Ahora corre dentro del contexto de Flask, evitando errores de contexto.
+    Corre dentro del contexto de Flask, evitando errores de contexto.
     """
     try:
         # Importar aquí para evitar import circular
