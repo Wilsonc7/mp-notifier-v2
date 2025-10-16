@@ -1,32 +1,38 @@
+import os
 from flask import Flask
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
+from app_v2.config import DB
 from app_v2.routes import bp as api_bp
 from app_v2.polling import poll_all_merchants
-from app_v2.config import DB
-import os
+
 
 def create_app():
     app = Flask(__name__)
     CORS(app)
 
-    # Configuración base de datos
+    # =============================
+    # 🔧 Configuración de base de datos
+    # =============================
     app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
     DB.init_app(app)
 
-    # Registrar rutas principales
+    # =============================
+    # 📡 Registrar rutas principales
+    # =============================
     app.register_blueprint(api_bp)
 
-    # Endpoint de salud (para Render)
+    # =============================
+    # 🩺 Ruta de verificación (Render health check)
+    # =============================
     @app.route("/health")
     def health():
-        return {"status": "ok"}, 200
+        return {"ok": True, "ts": os.popen("date -u +%Y-%m-%dT%H:%M:%S.%N").read().strip()}
 
-    # =========================
-    # 🔁 Scheduler de Polling
-    # =========================
+    # =============================
+    # 🔁 Scheduler (con contexto Flask)
+    # =============================
     scheduler = BackgroundScheduler()
 
     def run_polling():
@@ -34,19 +40,22 @@ def create_app():
         with app.app_context():
             try:
                 poll_all_merchants(DB.session)
+                print("[Scheduler] Polling ejecutado correctamente ✅")
             except Exception as e:
-                print(f"[Polling Error] {e}")
+                print(f"[Scheduler Error] {e}")
 
+    # Ejecutar cada 30 segundos
     scheduler.add_job(run_polling, trigger="interval", seconds=30)
     scheduler.start()
 
     return app
 
 
-# =========================
-# 🚀 Punto de entrada
-# =========================
+# =============================
+# 🚀 Inicialización del servidor
+# =============================
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
