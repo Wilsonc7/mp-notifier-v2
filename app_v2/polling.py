@@ -7,17 +7,15 @@ from app_v2.security import decrypt_token
 # ==============================
 # CONFIG
 # ==============================
-POLL_INTERVAL_SECONDS = 15  # 🔁 cada 15 segundos
-MP_API_URL = "https://api.mercadopago.com/v1/account/movements/search"
+POLL_INTERVAL_SECONDS = 30  # 🔸 cada 30 seg para test
+MP_API_URL = "https://api.mercadopago.com/v1/payments"
+# Nueva URL, ya no se usa /search
 
 scheduler = BackgroundScheduler()
 
-# ==============================
-# POLLING PRINCIPAL
-# ==============================
 def run_polling_job(app):
-    """Consulta movimientos recientes (pagos y transferencias)."""
-    print("\n🔄 Ejecutando job de polling…")
+    """Consulta pagos recientes desde Mercado Pago"""
+    print("🔄 Ejecutando job de polling...")
     try:
         with app.app_context():
             with DB.session() as session:
@@ -30,57 +28,58 @@ def run_polling_job(app):
                             print(f"⚠️ Token vacío o inválido para {m.name}")
                             continue
 
+                        # Buscar pagos recientes (últimas 3 horas)
                         now = datetime.utcnow()
                         date_from = (now - timedelta(hours=3)).isoformat() + "Z"
-                        params = {"begin_date": date_from, "limit": 10}
-                        headers = {"Authorization": f"Bearer {access_token}"}
 
-                        response = requests.get(MP_API_URL, headers=headers, params=params, timeout=20)
+                        headers = {
+                            "Authorization": f"Bearer {access_token}"
+                        }
+                        params = {
+                            "sort": "date_created",
+                            "criteria": "desc",
+                            "limit": 10,
+                            "range": "date_created",
+                            "begin_date": date_from,
+                        }
 
-                        if response.status_code != 200:
-                            print(f"⚠️ Error {response.status_code} desde MP: {response.text[:150]}")
+                        # 🔁 Nueva forma: buscar directamente en /payments
+                        r = requests.get(MP_API_URL, headers=headers, params=params, timeout=20)
+                        if r.status_code != 200:
+                            print(f"⚠️ Error {r.status_code} desde MP: {r.text[:200]}")
                             continue
 
-                        data = response.json()
-                        results = data.get("results", [])
-                        print(f"📥 {len(results)} movimientos encontrados para {m.name}")
+                        data = r.json()
+                        results = data.get("results", []) or data.get("elements", [])
+                        print(f"📥 {len(results)} pagos recibidos para {m.name}")
 
-                        for mov in results:
-                            mtype = mov.get("type", "unknown")
-                            status = mov.get("status", "unknown")
-                            source = mov.get("source", {}) or {}
-                            payer_name = source.get("name", "Desconocido")
-                            mov_id = str(mov.get("id", ""))
-                            amount = float(mov.get("amount", 0.0))
-                            created = mov.get("date_created") or mov.get("date")
-
-                            # Mostrar información detallada en consola
-                            print(f"🧾 Movimiento: {mtype} | Estado: {status} | Monto: ${amount:.2f} | Origen: {payer_name}")
-
-                            # Solo guardar entradas de dinero aprobadas
-                            if mtype not in ["payment", "transfer_received"] or status != "approved":
+                        for p in results:
+                            if p.get("status") != "approved":
                                 continue
 
-                            # Evitar duplicados
-                            if session.query(Payment).filter_by(id=mov_id).first():
+                            pid = str(p.get("id"))
+                            if session.query(Payment).filter_by(id=pid).first():
                                 continue
 
-                            # Guardar nuevo movimiento
-                            new_payment = Payment(
-                                id=mov_id,
+                            payer_info = p.get("payer", {}) or {}
+                            payer_name = (
+                                f"{payer_info.get('first_name', '')} {payer_info.get('last_name', '')}"
+                            ).strip() or "Desconocido"
+
+                            new_p = Payment(
+                                id=pid,
                                 merchant_id=m.id,
                                 payer_name=payer_name,
-                                amount=amount,
+                                amount=float(p.get("transaction_amount", 0.0)),
                                 status="approved",
                                 date_created=datetime.fromisoformat(
-                                    created.replace("Z", "")
-                                ) if created else datetime.utcnow(),
+                                    p.get("date_created").replace("Z", "")
+                                ) if p.get("date_created") else datetime.utcnow(),
                                 created_at=datetime.utcnow(),
                             )
-
-                            session.add(new_payment)
+                            session.add(new_p)
                             session.commit()
-                            print(f"💾 Guardado nuevo ingreso: {mtype} ${amount:.2f} de {payer_name}")
+                            print(f"💾 Guardado pago {pid} - ${new_p.amount} de {payer_name}")
 
                     except Exception as sub_e:
                         session.rollback()
@@ -89,11 +88,9 @@ def run_polling_job(app):
     except Exception as e:
         print(f"❌ Error general durante el polling: {e}")
 
-# ==============================
-# INICIO DEL SCHEDULER
-# ==============================
+
 def start_scheduler(app):
-    """Inicia el scheduler en segundo plano."""
+    """Inicia el scheduler con app.context()"""
     try:
         scheduler.add_job(run_polling_job, "interval", seconds=POLL_INTERVAL_SECONDS, args=[app])
         scheduler.start()
