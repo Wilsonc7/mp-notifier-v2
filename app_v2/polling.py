@@ -7,11 +7,10 @@ from app_v2.security import decrypt_token
 # ==============================
 # CONFIG
 # ==============================
-POLL_INTERVAL_SECONDS = 30  # 🔸 cada 30 seg para test
+POLL_INTERVAL_SECONDS = 30  # 🔸 cada 30 seg (rápido para test)
 MP_API_URL = "https://api.mercadopago.com/v1/payments"
-# Nueva URL, ya no se usa /search
-
 scheduler = BackgroundScheduler()
+
 
 def run_polling_job(app):
     """Consulta pagos recientes desde Mercado Pago"""
@@ -28,22 +27,18 @@ def run_polling_job(app):
                             print(f"⚠️ Token vacío o inválido para {m.name}")
                             continue
 
-                        # Buscar pagos recientes (últimas 3 horas)
                         now = datetime.utcnow()
                         date_from = (now - timedelta(hours=3)).isoformat() + "Z"
 
-                        headers = {
-                            "Authorization": f"Bearer {access_token}"
-                        }
+                        headers = {"Authorization": f"Bearer {access_token}"}
                         params = {
                             "sort": "date_created",
                             "criteria": "desc",
-                            "limit": 10,
                             "range": "date_created",
                             "begin_date": date_from,
+                            "limit": 10,
                         }
 
-                        # 🔁 Nueva forma: buscar directamente en /payments
                         r = requests.get(MP_API_URL, headers=headers, params=params, timeout=20)
                         if r.status_code != 200:
                             print(f"⚠️ Error {r.status_code} desde MP: {r.text[:200]}")
@@ -74,7 +69,9 @@ def run_polling_job(app):
                                 status="approved",
                                 date_created=datetime.fromisoformat(
                                     p.get("date_created").replace("Z", "")
-                                ) if p.get("date_created") else datetime.utcnow(),
+                                )
+                                if p.get("date_created")
+                                else datetime.utcnow(),
                                 created_at=datetime.utcnow(),
                             )
                             session.add(new_p)
