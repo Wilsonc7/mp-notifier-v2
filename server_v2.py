@@ -12,28 +12,23 @@ from app_v2.polling import start_scheduler
 app = Flask(__name__)
 CORS(app)
 
-# ✅ Configurar base de datos desde el entorno
+# ✅ Configuración de base de datos (Render -> Environment Variable)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 DB.init_app(app)
-
-# ==============================
-# RUTAS
-# ==============================
 app.register_blueprint(api_bp)
 
 # ==============================
-# ARRANQUE
+# INICIALIZACIÓN MANUAL
 # ==============================
-@app.before_first_request
-def initialize():
-    with app.app_context():
-        print("📦 Tablas creadas o verificadas correctamente.")
-        DB.create_all()
+with app.app_context():
+    print("📦 Tablas creadas o verificadas correctamente.")
+    DB.create_all()
 
-        start_scheduler()
-        print("✅ Flask App v2 inicializada correctamente con SQLAlchemy.")
+    # ✅ Iniciar el scheduler apenas arranca el servidor
+    start_scheduler()
+    print("✅ Flask App v2 inicializada correctamente con SQLAlchemy.")
 
 # ==============================
 # MAIN
