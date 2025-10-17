@@ -4,21 +4,21 @@ from datetime import datetime, timedelta
 from app_v2.models import DB, Merchant, Payment
 from app_v2.security import decrypt_token
 
-# Intervalo de consulta en segundos (más rápido = más inmediato)
-POLL_INTERVAL_SECONDS = 15  
+# 🔁 Intervalo de consulta
+POLL_INTERVAL_SECONDS = 15
+
+# 🧾 Nuevo endpoint de Mercado Pago que lista todas las actividades (pagos + transferencias)
 MP_API_URL = "https://api.mercadopago.com/v1/account/activities/search"
 
 scheduler = BackgroundScheduler()
 
-
 def run_polling_job(app):
-    """Consulta movimientos de cuenta desde Mercado Pago (incluye transferencias y QR)."""
-    print("🔄 Ejecutando job de polling (cuenta MP)...")
+    """Consulta todas las actividades recientes de cada merchant (pagos o transferencias)."""
+    print("🔄 Ejecutando job de polling...")
     try:
         with app.app_context():
             with DB.session() as session:
                 merchants = session.query(Merchant).all()
-
                 for m in merchants:
                     try:
                         access_token = decrypt_token(m.mp_access_token_enc)
@@ -26,47 +26,52 @@ def run_polling_job(app):
                             print(f"⚠️ Token vacío o inválido para {m.name}")
                             continue
 
-                        headers = {"Authorization": f"Bearer {access_token}"}
+                        # Buscamos las últimas 3 horas de movimientos
                         now = datetime.utcnow()
-                        date_from = (now - timedelta(hours=6)).isoformat() + "Z"
-                        params = {"limit": 10, "begin_date": date_from}
+                        date_from = (now - timedelta(hours=3)).isoformat() + "Z"
 
-                        # 📡 Consultamos los movimientos recientes
-                        r = requests.get(MP_API_URL, headers=headers, params=params, timeout=20)
+                        payload = {
+                            "range": {"date_created": {"from": date_from}},
+                            "filters": {"event_types": ["transfer", "payment"]},
+                            "limit": 10,
+                            "sort": {"field": "date_created", "order": "desc"},
+                        }
+
+                        headers = {
+                            "Authorization": f"Bearer {access_token}",
+                            "Content-Type": "application/json",
+                        }
+
+                        # ✅ POST (no GET)
+                        r = requests.post(MP_API_URL, headers=headers, json=payload, timeout=20)
+
                         if r.status_code != 200:
                             print(f"⚠️ Error {r.status_code} desde MP: {r.text[:200]}")
                             continue
 
                         data = r.json()
-                        results = data.get("results") or data.get("data") or []
+                        results = data.get("results", [])
+                        print(f"📥 {len(results)} actividades recibidas para {m.name}")
 
-                        print(f"📥 {len(results)} movimientos recibidos para {m.name}")
+                        for item in results:
+                            # Determinar si es pago o transferencia
+                            event_type = item.get("event_type", "")
+                            tx = item.get("transaction", {})
 
-                        for mov in results:
-                            # Filtramos solo ingresos (type puede ser credit, inflow, debit, etc.)
-                            mov_type = mov.get("type") or mov.get("operation_type")
-                            if mov_type not in ["credit", "inflow"]:
+                            if not tx:
                                 continue
 
-                            # ID único del movimiento
-                            pid = str(mov.get("id") or mov.get("operation_id") or mov.get("activity_id"))
-                            if not pid:
-                                continue
-
-                            # Evitar duplicados
+                            pid = str(tx.get("id") or tx.get("external_id") or f"tx_{datetime.utcnow().timestamp()}")
                             if session.query(Payment).filter_by(id=pid).first():
                                 continue
 
+                            amount = float(tx.get("amount", 0.0))
                             payer_name = (
-                                mov.get("source", {}).get("nickname")
-                                or mov.get("source", {}).get("name")
-                                or mov.get("description")
+                                tx.get("counterparty_name")
+                                or tx.get("description")
                                 or "Desconocido"
                             )
 
-                            amount = abs(float(mov.get("amount", 0.0)))
-
-                            # Guardamos el movimiento como pago aprobado
                             new_p = Payment(
                                 id=pid,
                                 merchant_id=m.id,
@@ -78,7 +83,7 @@ def run_polling_job(app):
                             )
                             session.add(new_p)
                             session.commit()
-                            print(f"💾 Guardado ingreso {pid} - ${amount:.2f} de {payer_name}")
+                            print(f"💾 Guardado {event_type}: ${amount} de {payer_name}")
 
                     except Exception as sub_e:
                         session.rollback()
@@ -89,7 +94,7 @@ def run_polling_job(app):
 
 
 def start_scheduler(app):
-    """Inicia el scheduler con app.context()"""
+    """Inicia el scheduler con el contexto Flask activo"""
     try:
         scheduler.add_job(run_polling_job, "interval", seconds=POLL_INTERVAL_SECONDS, args=[app])
         scheduler.start()
