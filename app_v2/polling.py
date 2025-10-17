@@ -8,25 +8,25 @@ from app_v2.security import decrypt_token
 # ==============================
 # CONFIG
 # ==============================
-POLL_INTERVAL_SECONDS = 60  # intervalo más estable
+POLL_INTERVAL_SECONDS = 60
 MP_API_URL = "https://api.mercadopago.com/v1/payments/search"
 
 scheduler = BackgroundScheduler()
 
 # ==============================
-# FUNCIONES DE POLLING
+# POLLING PRINCIPAL
 # ==============================
 def run_polling_job():
     print("🔄 Ejecutando job de polling...")
     try:
-        with DB.session() as session:
+        with DB.session.begin() as session:
             merchants = session.query(Merchant).all()
 
             for m in merchants:
                 try:
                     print(f"📡 Consultando pagos recientes desde Mercado Pago para {m.name}...")
 
-                    # ✅ Desencriptar token del merchant
+                    # 🔓 Desencriptar token
                     access_token = decrypt_token(m.mp_access_token_enc)
                     if not access_token:
                         print(f"⚠️ Token vacío o inválido para merchant {m.name}")
@@ -46,25 +46,27 @@ def run_polling_job():
 
                     r = requests.get(MP_API_URL, headers=headers, params=params, timeout=20)
                     if r.status_code != 200:
-                        print(f"⚠️ Error {r.status_code} desde Mercado Pago: {r.text}")
+                        print(f"⚠️ Error {r.status_code} desde MP para {m.name}: {r.text[:200]}")
                         continue
 
                     data = r.json()
                     results = data.get("results", [])
                     print(f"📥 Recibidos {len(results)} pagos para {m.name}")
 
+                    nuevos = 0
                     for p in results:
                         if p.get("status") != "approved":
                             continue
 
                         payment_id = str(p.get("id"))
-                        exists = session.query(Payment).filter_by(id=payment_id).first()
-                        if exists:
+                        if session.query(Payment).filter_by(id=payment_id).first():
                             continue  # evitar duplicados
 
-                        payer_info = p.get("payer", {})
-                        payer_name = f"{payer_info.get('first_name', '')} {payer_info.get('last_name', '')}".strip() or "Desconocido"
-                        amount = p.get("transaction_amount", 0.0)
+                        payer_info = p.get("payer", {}) or {}
+                        payer_name = (
+                            f"{payer_info.get('first_name', '')} {payer_info.get('last_name', '')}"
+                        ).strip() or "Desconocido"
+                        amount = float(p.get("transaction_amount", 0.0))
 
                         new_payment = Payment(
                             id=payment_id,
@@ -72,19 +74,26 @@ def run_polling_job():
                             payer_name=payer_name,
                             amount=amount,
                             status="approved",
-                            created_at=datetime.utcnow()
+                            date_created=datetime.fromisoformat(
+                                p.get("date_created").replace("Z", "")
+                            )
+                            if p.get("date_created")
+                            else datetime.utcnow(),
+                            created_at=datetime.utcnow(),
                         )
                         session.add(new_payment)
+                        nuevos += 1
+
+                    if nuevos:
                         session.commit()
-                        print(f"💾 Guardado pago {payment_id} - ${amount} de {payer_name}")
+                        print(f"💾 {nuevos} pagos nuevos guardados para {m.name}")
 
                 except Exception as inner_e:
-                    print(f"❌ Error en merchant {m.name}: {inner_e}")
+                    print(f"❌ Error procesando merchant {m.name}: {inner_e}")
                     session.rollback()
 
     except Exception as e:
-        print(f"❌ Error durante el polling: {e}")
-
+        print(f"❌ Error general durante el polling: {e}")
 
 # ==============================
 # SCHEDULER
