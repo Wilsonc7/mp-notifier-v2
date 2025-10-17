@@ -3,7 +3,7 @@ from sqlalchemy.dialects.postgresql import UUID, INET
 from datetime import datetime
 import uuid
 
-DB = SQLAlchemy()
+DB = SQLAlchemy(engine_options={"pool_pre_ping": True})
 
 
 # ========================================
