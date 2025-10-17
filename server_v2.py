@@ -1,3 +1,4 @@
+import os
 from flask import Flask
 from flask_cors import CORS
 
@@ -11,8 +12,8 @@ from app_v2.polling import start_scheduler
 app = Flask(__name__)
 CORS(app)
 
-# Configurar base de datos
-app.config["SQLALCHEMY_DATABASE_URI"] = DB.uri
+# ✅ Configurar base de datos desde el entorno
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 DB.init_app(app)
@@ -31,9 +32,7 @@ def initialize():
         print("📦 Tablas creadas o verificadas correctamente.")
         DB.create_all()
 
-        # 🔧 Iniciar el scheduler sin pasar argumentos
         start_scheduler()
-
         print("✅ Flask App v2 inicializada correctamente con SQLAlchemy.")
 
 # ==============================
