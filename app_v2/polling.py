@@ -6,31 +6,20 @@ from flask import current_app
 from app_v2.models import DB, Merchant, Payment
 from app_v2.security import decrypt_token
 
+# ==============================
+# CONFIG
+# ==============================
 POLL_INTERVAL_SECONDS = 60
 MP_API_URL = "https://api.mercadopago.com/v1/payments/search"
 
 scheduler = BackgroundScheduler()
 
 # ==============================
-# POLLING PRINCIPAL
+# POLLING JOB
 # ==============================
 def run_polling_job():
-    """Consulta los pagos recientes desde Mercado Pago y guarda nuevos."""
+    """Consulta los pagos recientes desde Mercado Pago."""
     print("🔄 Ejecutando job de polling...")
-
-    # 🔧 Crear contexto Flask manualmente
-    try:
-        app = current_app._get_current_object()
-    except RuntimeError:
-        # Si no hay app activa (Render recién reiniciado)
-        from app_v2.server_import import app  # pequeño helper que veremos abajo
-        app_context = app.app_context()
-        app_context.push()
-        print("🧩 Contexto Flask creado manualmente para polling.")
-    else:
-        app_context = app.app_context()
-        app_context.push()
-
     try:
         with DB.session.begin() as session:
             merchants = session.query(Merchant).all()
@@ -71,7 +60,7 @@ def run_polling_job():
 
                         payment_id = str(p.get("id"))
                         if session.query(Payment).filter_by(id=payment_id).first():
-                            continue  # evitar duplicados
+                            continue
 
                         payer_info = p.get("payer", {}) or {}
                         payer_name = (
@@ -105,18 +94,17 @@ def run_polling_job():
 
     except Exception as e:
         print(f"❌ Error general durante el polling: {e}")
-    finally:
-        app_context.pop()
 
 # ==============================
 # SCHEDULER
 # ==============================
-def start_scheduler():
-    """Inicia el scheduler en background"""
+def start_scheduler(app):
+    """Inicia el scheduler en background con contexto Flask activo"""
     try:
-        scheduler.add_job(run_polling_job, "interval", seconds=POLL_INTERVAL_SECONDS)
-        scheduler.start()
-        print(f"[Scheduler] Iniciado cada {POLL_INTERVAL_SECONDS} segundos.")
-        print("⏱️ Scheduler iniciado correctamente.")
+        with app.app_context():
+            scheduler.add_job(run_polling_job, "interval", seconds=POLL_INTERVAL_SECONDS)
+            scheduler.start()
+            print(f"[Scheduler] Iniciado cada {POLL_INTERVAL_SECONDS} segundos.")
+            print("⏱️ Scheduler iniciado correctamente con contexto Flask.")
     except Exception as e:
         print(f"[Scheduler] Error al iniciar: {e}")
