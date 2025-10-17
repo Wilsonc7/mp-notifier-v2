@@ -33,6 +33,7 @@ def get_device_from_auth():
 
 @bp.get("/status")
 def status():
+    """Verifica que el servidor esté activo"""
     return jsonify({"ok": True, "message": "Servidor activo ✅"}), 200
 
 
@@ -63,21 +64,22 @@ def device_payments():
         with DB.session() as session:
             pagos = (
                 session.query(Payment)
-                .filter_by(device_id=d.id)
+                .filter_by(merchant_id=d.merchant_id)  # 🔹 corregido
+                .filter(Payment.status == "approved")  # 🔹 opcional: solo pagos aprobados
                 .order_by(Payment.created_at.desc())
                 .limit(10)
                 .all()
             )
 
             result = [{
-                "id": p.id,
+                "id": str(p.id),
                 "nombre": p.payer_name,
-                "monto": p.amount,
+                "monto": float(p.amount),
                 "estado": p.status,
-                "fecha": p.created_at.isoformat()
+                "fecha": p.created_at.isoformat() if p.created_at else None
             } for p in pagos]
 
-        print(f"[Pagos] Enviando {len(result)} pagos para device_id={d.id}")
+        print(f"[Pagos] Enviando {len(result)} pagos para merchant_id={d.merchant_id}")
         return jsonify(result), 200
 
     except Exception as e:
@@ -88,6 +90,7 @@ def device_payments():
 # Alias para compatibilidad con el ESP32
 @bp.get("/alias_pagos")
 def pagos_alias():
+    """Alias de compatibilidad para /pagos"""
     return device_payments()
 
 
@@ -97,6 +100,7 @@ def pagos_alias():
 
 @bp.post("/register")
 def register_device():
+    """Registra un nuevo dispositivo"""
     data = request.get_json() or {}
     name = data.get("name")
     if not name:
@@ -112,7 +116,7 @@ def register_device():
 
             return jsonify({
                 "ok": True,
-                "id": new_dev.id,
+                "id": str(new_dev.id),
                 "token": new_dev.token
             }), 201
 
@@ -127,6 +131,7 @@ def register_device():
 
 @bp.post("/secure")
 def secure_test():
+    """Prueba de cifrado y descifrado de datos"""
     data = request.get_json()
     if not data or "msg" not in data:
         return jsonify({"error": "Falta parámetro 'msg'"}), 400
@@ -139,4 +144,4 @@ def secure_test():
         "original": data["msg"],
         "encrypted": encrypted,
         "decrypted": decrypted
-    })
+    }), 200
