@@ -1,36 +1,38 @@
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta
+
 from app_v2.models import DB, Merchant, Payment
 from app_v2.security import decrypt_token
 
 # ==============================
 # CONFIG
 # ==============================
-POLL_INTERVAL_SECONDS = 60  # cada 60 s para evitar saturar Render
+POLL_INTERVAL_SECONDS = 60  # intervalo más estable
 MP_API_URL = "https://api.mercadopago.com/v1/payments/search"
 
 scheduler = BackgroundScheduler()
 
 # ==============================
-# Función principal de polling
+# FUNCIONES DE POLLING
 # ==============================
 def run_polling_job():
     print("🔄 Ejecutando job de polling...")
     try:
         with DB.session() as session:
             merchants = session.query(Merchant).all()
+
             for m in merchants:
                 try:
                     print(f"📡 Consultando pagos recientes desde Mercado Pago para {m.name}...")
 
-                    # ✅ desencripta el access token
+                    # ✅ Desencriptar token del merchant
                     access_token = decrypt_token(m.mp_access_token_enc)
                     if not access_token:
-                        print(f"⚠️ Token de acceso vacío o inválido para merchant {m.name}")
+                        print(f"⚠️ Token vacío o inválido para merchant {m.name}")
                         continue
 
-                    # 🔍 ventana de tiempo de los últimos 3 h
+                    # Buscar pagos de las últimas 3 horas
                     now = datetime.utcnow()
                     date_from = (now - timedelta(hours=3)).isoformat() + "Z"
 
@@ -40,10 +42,9 @@ def run_polling_job():
                         "begin_date": date_from,
                         "limit": 10
                     }
-
                     headers = {"Authorization": f"Bearer {access_token}"}
-                    r = requests.get(MP_API_URL, headers=headers, params=params, timeout=20)
 
+                    r = requests.get(MP_API_URL, headers=headers, params=params, timeout=20)
                     if r.status_code != 200:
                         print(f"⚠️ Error {r.status_code} desde Mercado Pago: {r.text}")
                         continue
@@ -53,28 +54,24 @@ def run_polling_job():
                     print(f"📥 Recibidos {len(results)} pagos para {m.name}")
 
                     for p in results:
-                        status = p.get("status", "")
-                        if status != "approved":
-                            continue  # solo pagos aprobados
+                        if p.get("status") != "approved":
+                            continue
 
                         payment_id = str(p.get("id"))
                         exists = session.query(Payment).filter_by(id=payment_id).first()
                         if exists:
-                            continue  # ya guardado
+                            continue  # evitar duplicados
 
-                        payer_name = ""
                         payer_info = p.get("payer", {})
-                        if payer_info:
-                            payer_name = payer_info.get("first_name", "") + " " + payer_info.get("last_name", "")
-
+                        payer_name = f"{payer_info.get('first_name', '')} {payer_info.get('last_name', '')}".strip() or "Desconocido"
                         amount = p.get("transaction_amount", 0.0)
 
                         new_payment = Payment(
                             id=payment_id,
                             merchant_id=m.id,
-                            payer_name=payer_name.strip() or "Desconocido",
+                            payer_name=payer_name,
                             amount=amount,
-                            status=status,
+                            status="approved",
                             created_at=datetime.utcnow()
                         )
                         session.add(new_payment)
@@ -84,12 +81,13 @@ def run_polling_job():
                 except Exception as inner_e:
                     print(f"❌ Error en merchant {m.name}: {inner_e}")
                     session.rollback()
+
     except Exception as e:
         print(f"❌ Error durante el polling: {e}")
 
 
 # ==============================
-# Scheduler
+# SCHEDULER
 # ==============================
 def start_scheduler():
     """Inicia el scheduler en background"""
@@ -97,5 +95,6 @@ def start_scheduler():
         scheduler.add_job(run_polling_job, "interval", seconds=POLL_INTERVAL_SECONDS)
         scheduler.start()
         print(f"[Scheduler] Iniciado cada {POLL_INTERVAL_SECONDS} segundos.")
+        print("⏱️ Scheduler iniciado correctamente.")
     except Exception as e:
         print(f"[Scheduler] Error al iniciar: {e}")
