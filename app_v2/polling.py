@@ -1,13 +1,11 @@
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta
+from flask import current_app
 
 from app_v2.models import DB, Merchant, Payment
 from app_v2.security import decrypt_token
 
-# ==============================
-# CONFIG
-# ==============================
 POLL_INTERVAL_SECONDS = 60
 MP_API_URL = "https://api.mercadopago.com/v1/payments/search"
 
@@ -17,7 +15,22 @@ scheduler = BackgroundScheduler()
 # POLLING PRINCIPAL
 # ==============================
 def run_polling_job():
+    """Consulta los pagos recientes desde Mercado Pago y guarda nuevos."""
     print("🔄 Ejecutando job de polling...")
+
+    # 🔧 Crear contexto Flask manualmente
+    try:
+        app = current_app._get_current_object()
+    except RuntimeError:
+        # Si no hay app activa (Render recién reiniciado)
+        from app_v2.server_import import app  # pequeño helper que veremos abajo
+        app_context = app.app_context()
+        app_context.push()
+        print("🧩 Contexto Flask creado manualmente para polling.")
+    else:
+        app_context = app.app_context()
+        app_context.push()
+
     try:
         with DB.session.begin() as session:
             merchants = session.query(Merchant).all()
@@ -26,13 +39,11 @@ def run_polling_job():
                 try:
                     print(f"📡 Consultando pagos recientes desde Mercado Pago para {m.name}...")
 
-                    # 🔓 Desencriptar token
                     access_token = decrypt_token(m.mp_access_token_enc)
                     if not access_token:
                         print(f"⚠️ Token vacío o inválido para merchant {m.name}")
                         continue
 
-                    # Buscar pagos de las últimas 3 horas
                     now = datetime.utcnow()
                     date_from = (now - timedelta(hours=3)).isoformat() + "Z"
 
@@ -40,7 +51,7 @@ def run_polling_job():
                         "sort": "date_created",
                         "criteria": "desc",
                         "begin_date": date_from,
-                        "limit": 10
+                        "limit": 10,
                     }
                     headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -94,6 +105,8 @@ def run_polling_job():
 
     except Exception as e:
         print(f"❌ Error general durante el polling: {e}")
+    finally:
+        app_context.pop()
 
 # ==============================
 # SCHEDULER
