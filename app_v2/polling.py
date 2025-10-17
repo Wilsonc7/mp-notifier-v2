@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 from app_v2.models import DB, Merchant, Payment
 from app_v2.security import decrypt_token
 
-# Intervalo de consulta (en segundos)
-POLL_INTERVAL_SECONDS = 30  # 🔁 cada 30 segundos
+# Intervalo de consulta en segundos (más rápido = más inmediato)
+POLL_INTERVAL_SECONDS = 15  
 MP_API_URL = "https://api.mercadopago.com/v1/account/activities/search"
 
 scheduler = BackgroundScheduler()
@@ -43,8 +43,9 @@ def run_polling_job(app):
                         print(f"📥 {len(results)} movimientos recibidos para {m.name}")
 
                         for mov in results:
-                            # Filtramos solo ingresos (pueden venir débitos o créditos)
-                            if mov.get("type") not in ["credit", "inflow"]:
+                            # Filtramos solo ingresos (type puede ser credit, inflow, debit, etc.)
+                            mov_type = mov.get("type") or mov.get("operation_type")
+                            if mov_type not in ["credit", "inflow"]:
                                 continue
 
                             # ID único del movimiento
@@ -65,7 +66,7 @@ def run_polling_job(app):
 
                             amount = abs(float(mov.get("amount", 0.0)))
 
-                            # Guardamos el movimiento
+                            # Guardamos el movimiento como pago aprobado
                             new_p = Payment(
                                 id=pid,
                                 merchant_id=m.id,
