@@ -1,7 +1,6 @@
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta
-from flask import current_app
 
 from app_v2.models import DB, Merchant, Payment
 from app_v2.security import decrypt_token
@@ -20,8 +19,10 @@ scheduler = BackgroundScheduler()
 def run_polling_job():
     """Consulta los pagos recientes desde Mercado Pago."""
     print("🔄 Ejecutando job de polling...")
+
     try:
-        with DB.session.begin() as session:
+        # ✅ usamos DB.session() en lugar de .begin()
+        with DB.session() as session:
             merchants = session.query(Merchant).all()
 
             for m in merchants:
@@ -82,11 +83,12 @@ def run_polling_job():
                             created_at=datetime.utcnow(),
                         )
                         session.add(new_payment)
+                        session.commit()
                         nuevos += 1
+                        print(f"💾 Guardado pago {payment_id} - ${amount} de {payer_name}")
 
                     if nuevos:
-                        session.commit()
-                        print(f"💾 {nuevos} pagos nuevos guardados para {m.name}")
+                        print(f"✅ {nuevos} pagos nuevos guardados para {m.name}")
 
                 except Exception as inner_e:
                     print(f"❌ Error procesando merchant {m.name}: {inner_e}")
