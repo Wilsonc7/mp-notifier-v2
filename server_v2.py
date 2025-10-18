@@ -4,6 +4,7 @@ from datetime import datetime
 from app_v2.models import DB
 from app_v2.polling import start_scheduler
 
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object("app_v2.config.Config")
@@ -11,35 +12,44 @@ def create_app():
     # ✅ Habilitar CORS
     CORS(app)
 
-    # ✅ Inicializar la base de datos con pre-ping para evitar conexiones muertas
+    # ✅ Inicializar SQLAlchemy con pre-ping (evita errores de conexión inactiva)
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
     DB.init_app(app)
 
     with app.app_context():
         DB.create_all()
         print("📦 Tablas creadas o verificadas correctamente.")
 
-    # ✅ Registrar blueprints (rutas del sistema)
+    # ✅ Registrar blueprints
     try:
         from app_v2.routes.devices import devices_bp
         from app_v2.routes.pagos import pagos_bp
+        from app_v2.routes_notify import bp_notify  # 🟢 Nuevo blueprint
+
         app.register_blueprint(devices_bp)
         app.register_blueprint(pagos_bp)
-        print("🧩 Blueprints de dispositivos y pagos registrados correctamente.")
+        app.register_blueprint(bp_notify)  # 🟢 Registrar /notify
+
+        print("🧩 Blueprints registrados correctamente: devices, pagos, notify")
+
     except Exception as e:
         print(f"⚠️ Error registrando blueprints: {e}")
 
-    # ✅ Iniciar el scheduler del polling dentro del contexto de la app
+    # ✅ Iniciar el scheduler de polling
     try:
         start_scheduler(app)
+        print("⏱️ Scheduler iniciado correctamente.")
     except Exception as e:
-        print(f"⚠️ Error iniciando el scheduler: {e}")
+        print(f"⚠️ Error iniciando scheduler: {e}")
 
-    # ✅ Rutas simples de prueba
+    # ==============================
+    # RUTAS BÁSICAS
+    # ==============================
     @app.route("/")
-    def home():
+    def index():
         return jsonify({
             "status": "ok",
-            "message": "Servidor Flask MP-Notifier v2 en ejecución 🚀",
+            "message": "Servidor Flask MP-Notifier v2 activo 🚀",
             "time": datetime.utcnow().isoformat()
         })
 
@@ -47,8 +57,8 @@ def create_app():
     def health():
         return jsonify({
             "status": "ok",
-            "time": datetime.utcnow().isoformat(),
-            "db_connected": DB.session.bind is not None
+            "db_connected": DB.session.bind is not None,
+            "time": datetime.utcnow().isoformat()
         })
 
     return app
@@ -60,5 +70,4 @@ def create_app():
 app = create_app()
 
 if __name__ == "__main__":
-    # ⚙️ Ejecución local (no necesaria en Render)
     app.run(host="0.0.0.0", port=10000, debug=True)
