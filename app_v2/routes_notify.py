@@ -1,43 +1,36 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-from app_v2.models import DB, Payment, Merchant
+from app_v2.models import DB, Merchant, Payment
 
 bp_notify = Blueprint("notify", __name__)
 
 @bp_notify.route("/notify", methods=["POST"])
-def notify():
-    """
-    📩 Recibe notificaciones desde el dispositivo Android.
-    Espera un JSON con: package, title, text
-    """
-    try:
-        data = request.get_json(force=True)
-        package = data.get("package")
-        title = data.get("title")
-        text = data.get("text")
+def notify_payment():
+    data = request.get_json(force=True)
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    serial = request.headers.get("Device-Serial", "")
 
-        print(f"📥 Notificación recibida desde Android:")
-        print(f"   🧩 App: {package}")
-        print(f"   🏷️ Título: {title}")
-        print(f"   💬 Texto: {text}")
+    if not token or not serial:
+        return jsonify({"error": "Falta token o serial"}), 400
 
-        # ✅ Detectar si parece una transferencia o pago recibido
-        if any(word in text.lower() for word in ["recibiste", "transferencia", "enviaron", "acreditado", "pagaron"]):
-            new_payment = Payment(
-                id=f"local_{datetime.utcnow().timestamp()}",
-                merchant_id=None,  # O podés vincularlo a un Merchant si querés
-                payer_name="Notificación Android",
-                amount=0.0,  # No siempre se sabe el monto exacto
-                status="notified",
-                date_created=datetime.utcnow(),
-                created_at=datetime.utcnow(),
-            )
-            DB.session.add(new_payment)
-            DB.session.commit()
-            print("💾 Guardado en DB como 'transferencia detectada'.")
+    merchant = Merchant.query.filter_by(device_api_key=token).first()
+    if not merchant:
+        return jsonify({"error": "Dispositivo no autorizado"}), 403
 
-        return jsonify({"status": "ok", "message": "Notificación recibida"}), 200
+    # 🟢 Crear un "pago" tipo notificación Android
+    new_payment = Payment(
+        id=f"local_{datetime.utcnow().timestamp()}",
+        merchant_id=merchant.id,
+        payer_name=data.get("payer_name", "Notificación Android"),
+        amount=float(data.get("amount", 0.0)),
+        status="notified",
+        status_extra="notify_android",
+        date_created=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+    )
 
-    except Exception as e:
-        print(f"❌ Error procesando notificación: {e}")
-        return jsonify({"error": str(e)}), 500
+    DB.session.add(new_payment)
+    DB.session.commit()
+
+    print(f"📲 Notificación Android recibida: {new_payment.payer_name} - ${new_payment.amount}")
+    return jsonify({"ok": True, "id": new_payment.id})
